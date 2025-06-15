@@ -1,52 +1,96 @@
 import streamlit as st
 import google.generativeai as genai
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
 
-# Carrega a chave da API do arquivo .env
+# Carregar chave da API
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Inicializa o modelo
-model = genai.GenerativeModel("gemini-pro")
 
-# Lista de matérias disponíveis
-subjects = [
-    "Matemática", "Física", "Química", "História",
-    "Geografia", "Biologia", "Português", "Inglês"
-]
+model = genai.GenerativeModel("gemini-1.5-flash")
 
-st.set_page_config(page_title="Tutor Inteligente", page_icon="📚")
-st.title("Tutor Inteligente com IA")
-st.write("Seu assistente de estudos com explicações, resumos e quizzes!")
 
-# Seleção de matéria
-subject = st.selectbox("Escolha uma matéria:", subjects)
+st.set_page_config(page_title="Tutor IA")
+st.title("Tutor Inteligente com Gemini")
+st.write("Use a IA para explicar, resumir ou testar seu conhecimento!")
 
-# Tipo de atividade
-task = st.radio("O que você deseja?", ["Explicação", "Resumo", "Gerar Quiz"])
+subjects = ["Matemática", "Física", "História", "Geografia", "Português"]
+subject = st.selectbox("Escolha a matéria:", subjects)
+task = st.radio("Tipo de ajuda:", ["Explicação", "Resumo", "Quiz"])
+user_input = st.text_area("Descreva o que você quer saber:")
 
-# Entrada de conteúdo
-prompt = st.text_area("Digite sua dúvida, tópico ou conteúdo:", height=150)
 
-# Botão para gerar
-if st.button("🔍 Obter Resposta"):
-    with st.spinner("Consultando a IA..."):
+if "quiz_gerado" not in st.session_state:
+    st.session_state.quiz_gerado = False
+if "quiz_texto" not in st.session_state:
+    st.session_state.quiz_texto = ""
+if "gabarito" not in st.session_state:
+    st.session_state.gabarito = {}
+
+
+if st.button("Gerar resposta"):
+    with st.spinner("A IA está gerando o conteúdo..."):
         try:
             if task == "Explicação":
-                user_input = f"Explique detalhadamente sobre {prompt}, na matéria de {subject}."
-            elif task == "Resumo":
-                user_input = f"Resuma o seguinte conteúdo de {subject}: {prompt}"
-            elif task == "Gerar Quiz":
-                user_input = f"Crie 5 questões de múltipla escolha com respostas corretas sobre: {prompt} (matéria: {subject})."
+                prompt = f"Explique o seguinte conteúdo de {subject}: {user_input}"
+                response = model.generate_content(prompt)
+                st.subheader("Explicação:")
+                st.write(response.text)
+                st.session_state.quiz_gerado = False
 
-            response = model.generate_content(user_input)
-            st.markdown("###  Resposta da IA:")
-            st.write(response.text)
+            elif task == "Resumo":
+                prompt = f"Resuma o seguinte conteúdo de {subject}: {user_input}"
+                response = model.generate_content(prompt)
+                st.subheader("Resumo:")
+                st.write(response.text)
+                st.session_state.quiz_gerado = False
+
+            elif task == "Quiz":
+                prompt = (
+                    f"Crie 3 perguntas de múltipla escolha com 4 alternativas cada "
+                    f"(a, b, c, d) sobre {user_input} na matéria {subject}. "
+                    "Inclua o gabarito no final no formato 'Respostas: 1:b 2:a 3:d'"
+                )
+                response = model.generate_content(prompt)
+                quiz_text = response.text
+
+                
+                parts = quiz_text.strip().split("Respostas:")
+                perguntas = parts[0].strip()
+                respostas = parts[1].strip() if len(parts) > 1 else ""
+
+                
+                gabarito = {}
+                for item in respostas.split():
+                    if ':' in item:
+                        num, letra = item.split(':')
+                        gabarito[num] = letra.lower()
+
+                
+                st.session_state.quiz_texto = perguntas
+                st.session_state.gabarito = gabarito
+                st.session_state.quiz_gerado = True
 
         except Exception as e:
-            st.error(" Erro ao gerar resposta. Verifique sua conexão ou chave da API.")
+            st.error("Erro ao gerar resposta.")
             st.exception(e)
 
-st.markdown("---")
-st.caption("Desenvolvido com Streamlit + Gemini")
+
+if st.session_state.quiz_gerado:
+    st.subheader("Quiz gerado:")
+    st.markdown(st.session_state.quiz_texto)
+
+    respostas_usuario = {}
+    for i in range(1, 4):
+        respostas_usuario[str(i)] = st.radio(
+            f"Pergunta {i}:", ["a", "b", "c", "d"], key=f"resposta_{i}"
+        )
+
+    if st.button("Ver resultado"):
+        acertos = 0
+        for i in range(1, 4):
+            correta = st.session_state.gabarito.get(str(i), "")
+            if respostas_usuario[str(i)] == correta:
+                acertos += 1
+        st.success(f"Você acertou {acertos} de 3 perguntas.")
